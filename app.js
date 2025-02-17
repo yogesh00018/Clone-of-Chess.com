@@ -1,66 +1,79 @@
-const express = require("express");
-const socket = require("socket.io");
-const http = require("http");
+// Import required modules
+const express = require("express"); // Express framework for handling HTTP requests
+const socketIO = require("socket.io"); // Socket.IO for real-time communication
+const http = require("http"); // HTTP module to create a server
+const { Chess } = require("chess.js"); // Chess.js library for game logic
+const path = require("path"); // Path module for handling file paths
 
-const { Chess } = require ("chess.js");
+const app = express(); // Initialize Express app
+const server = http.createServer(app); // Create an HTTP server
+const io = socketIO(server); // Attach Socket.IO to the server
 
-//const { path } = require("express/lib/application");
-const req = require("express/lib/request");
-const res = require("express/lib/response");
+const chess = new Chess(); // Initialize a new Chess game
+let player = {}; // Stores both players' unique socket IDs
+let currentPlayer = "w"; // White always starts first
 
-const path = require("path");
-const { title } = require("process");
-const app = express();
-
-const server = http.createServer(app);
-const io  = socket(server);
-
-const chess = new Chess();
-let player = {}; //this will store both player id white and black with unique id
-let currentPlayer = "W";
-
+// Set view engine to EJS for rendering HTML
 app.set("view engine", "ejs");
-app.use(express.static(path.join(__dirname,"public")));
-app.get("/", (req,res)=>{
-    res.render("index", {title: "Chess Game"});
+
+// Serve static files from the 'public' folder
+app.use(express.static(path.join(__dirname, "public")));
+
+// Define a route for the home page
+app.get("/", (req, res) => {
+    res.render("index", { title: "Chess Game" }); // Render 'index.ejs' with a title
 });
 
-io.on("connection", function(uniquesocket) // uniquesocket is name to recive data form backe end
-{
- console.log("connected");
+// Handle WebSocket connections
+io.on("connection", function (uniquesocket) {
+    console.log("A player connected:", uniquesocket.id);
 
-// uniquesocket.on("disconnect", function(){
-//     console.log("disconnected");
-    
-// })
-// if any player joins first then he will get white side and if second player join
-//  it will check wether any player had join or not if join then it will give black side to play
-if(!player.white){
-    players.white= uniquesocket.id;
-    uniquesocket.emit("playerRole","w");// this line show the player that you wil play with white side
-}
-else if (!player.black){
-    players.black = uniquesocket.id;
-    uniquesocket.emit("playerRole","b");// this line show the player that you are playing with black side
-}else{
-    uniquesocket.emit("sepctatorRole"); // if third player join it will check the if there is first player is ther or not if not then it will conntinue as white 
-    //and check for second player if it is there then it will conceder as spectator 
-}
-
-// if any player disconected or close the tab the game is pasue until the new player join
-socket.on("disconnect", function(){
-    if(uniquesocket.id === player.white){
-        delete players.white;
-
+    // Assign players based on connection order
+    if (!player.white) {
+        player.white = uniquesocket.id;
+        uniquesocket.emit("playerRole", "w"); // Assign white pieces
+    } else if (!player.black) {
+        player.black = uniquesocket.id;
+        uniquesocket.emit("playerRole", "b"); // Assign black pieces
+    } else {
+        uniquesocket.emit("spectatorRole"); // If both slots are taken, assign spectator role
     }
-    else if (uniquesocket.id === players.black){
-        delete players.black;
 
-    }
-})
+    // Handle player disconnection
+    uniquesocket.on("disconnect", function () {
+        if (uniquesocket.id === player.white) {
+            delete player.white; // Remove white player if they disconnect
+        } else if (uniquesocket.id === player.black) {
+            delete player.black; // Remove black player if they disconnect
+        }
+        console.log("A player disconnected:", uniquesocket.id);
+    });
+
+    // Handle player moves
+    uniquesocket.on("move", (move) => {
+        try {
+            // Ensure the correct player is making a move
+            if (chess.turn() === "w" && uniquesocket.id !== player.white) return;
+            if (chess.turn() === "b" && uniquesocket.id !== player.black) return;
+
+            const result = chess.move(move); // Attempt the move
+            if (result) {
+                currentPlayer = chess.turn(); // Update current player turn
+                io.emit("move", move); // Notify all players of the move
+                io.emit("boardState", chess.fen()); // Send the updated board state
+            } else {
+                console.log("Invalid move:", move);
+                uniquesocket.emit("invalidMove", move); // Notify player of an invalid move
+            }
+        } catch (err) {
+            console.log(err);
+            uniquesocket.emit("invalidMove", move); // Handle errors gracefully
+        }
+    });
 });
+app.use(express.static("public"));
 
-server.listen(3000, function(){
-    console.log("listening on port:3000");
-    
+// Start the server on port 3000
+server.listen(3000, function () {
+    console.log("Server is running on port 3000");
 });
